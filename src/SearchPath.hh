@@ -95,7 +95,7 @@ private:
                 search_path.push_back(std::move(path));
             }
             else {
-                printf("SearchPath doesn't exist: %s\n", path.c_str());
+                fprintf(stderr, "SearchPath doesn't exist: %s\n", path.c_str());
             }
         }
     }

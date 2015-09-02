@@ -55,6 +55,9 @@ Options:
         Display binary name after each entry (off by default)
     --term=<command>
         Sets the terminal emulator used to start terminal apps
+    --add-paths=<PATH1:PATH2...>
+        Colon separated list of aditional directories to be
+        included in search path
     --help
         Display this help message
 

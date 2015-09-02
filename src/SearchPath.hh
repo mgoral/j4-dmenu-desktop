@@ -85,10 +85,13 @@ private:
     }
 
     void push_paths(const stringlist_t &sp) {
-        for (std::string path : sp) {
+        for (auto path : sp) {
+            // Fix double slashes, if any
             replace(path, "//", "/");
             if (is_directory(path)) {
-                printf("SearchPath: %s\n", path.c_str());
+#ifdef DEBUG
+                fprintf(stderr, "SearchPath: %s\n", path.c_str());
+#endif
                 search_path.push_back(std::move(path));
             }
             else {

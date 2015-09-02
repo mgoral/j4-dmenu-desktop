@@ -3,6 +3,9 @@
 #include <unistd.h>
 #include <cstring>
 #include <getopt.h>
+#include <vector>
+#include <algorithm>
+#include <locale>
 
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -28,13 +31,44 @@ public:
         if(read_args(argc, argv))
             return 0;
 
+        if(use_xdg_de) {
+            std::string env_var = get_variable("XDG_CURRENT_DESKTOP");
+            //XDG_CURRENT_DESKTOP can contain multiple environments separated by colons
+            split(env_var, ':', environment);
+            if(environment.empty())
+                use_xdg_de = false;
+        }
+
+#ifdef DEBUG
+        fprintf(stderr, "desktop environment:\n");
+        for(auto s: environment)
+            fprintf(stderr, "%s\n", s.c_str());
+#endif
+
         this->dmenu = new Dmenu(this->dmenu_command);
 
         collect_files();
 
-        // Transfer the list to dmenu
+        // Sort applications by displayed name
+        std::vector<std::pair<std::string, const Application *>> iteration_order;
+        iteration_order.reserve(apps.size());
         for(auto &app : apps) {
-            this->dmenu->write(app.first);
+            iteration_order.push_back({app.first, app.second});
+        }
+
+        std::locale locale("");
+        std::sort(iteration_order.begin(), iteration_order.end(), [locale](
+                      const std::pair<std::string, const Application *> &s1,
+                      const std::pair<std::string, const Application *> &s2) {
+                      return locale(s1.second->name, s2.second->name);
+                  });
+
+        // Transfer the list to dmenu
+        for(auto &app : iteration_order) {
+            this->dmenu->write(app.second->name);
+            const std::string &generic_name = app.second->generic_name;
+            if(generic_name.size() && app.second->name != generic_name)
+                this->dmenu->write(generic_name);
         }
 
         this->dmenu->display();
@@ -47,7 +81,7 @@ public:
             if((shell = getenv("SHELL")) == 0)
                 shell = "/bin/sh";
 
-	    fprintf(stderr, "%s -i -c '%s'\n", shell, command.c_str());
+            fprintf(stderr, "%s -i -c '%s'\n", shell, command.c_str());
 
             return execl(shell, shell, "-i", "-c", command.c_str(), 0);
         }
@@ -67,6 +101,8 @@ private:
                 "    --dmenu=<command>\n"
                 "\tDetermines the command used to invoke dmenu\n"
                 "\tExecuted with your shell ($SHELL) or /bin/sh\n"
+                "    --use-xdg-de\n"
+                "\tEnables reading $XDG_CURRENT_DESKTOP to determine the desktop environment\n"
                 "    --display-binary\n"
                 "\tDisplay binary name after each entry (off by default)\n"
                 "    --add-paths=<PATH1:PATH2...>\n"
@@ -86,6 +122,7 @@ private:
             int option_index = 0;
             static struct option long_options[] = {
                 {"dmenu",          required_argument,  0,  'd'},
+                {"use-xdg-de",     no_argument,        0,  'x'},
                 {"term",           required_argument,  0,  't'},
                 {"help",           no_argument,        0,  'h'},
                 {"display-binary", no_argument,        0,  'b'},
@@ -93,13 +130,16 @@ private:
                 {0, 0, 0, 0}
             };
 
-            int c = getopt_long(argc, argv, "d:t:hb", long_options, &option_index);
+            int c = getopt_long(argc, argv, "d:t:xhb", long_options, &option_index);
             if(c == -1)
                 break;
 
             switch (c) {
             case 'd':
                 this->dmenu_command = optarg;
+                break;
+            case 'x':
+                use_xdg_de = true;
                 break;
             case 't':
                 this->terminal = optarg;
@@ -155,18 +195,20 @@ private:
     }
 
     void handle_file(const std::string &file) {
-        Application *dft = new Application(suffixes);
+        Application *dft = new Application(suffixes, use_xdg_de ? &environment : 0);
         bool file_read = dft->read(file.c_str(), &buf, &bufsz);
         dft->name = this->appformatter(*dft);
 
         if(file_read && dft->name.size()) {
-            if(apps.count(dft->name)) {
-                delete apps[dft->name];
+            if(apps.count(dft->id)) {
+                delete apps[dft->id];
             }
-            apps[dft->name] = dft;
+            apps[dft->id] = dft;
         } else {
-            if(dft->name.size())
-                apps.erase(dft->name);
+            if(dft->id.size()) {
+                delete apps[dft->id];
+                apps.erase(dft->id);
+            }
             delete dft;
         }
         parsed_files++;
@@ -183,12 +225,12 @@ private:
         if(!choice.size())
             return "";
 
-	fprintf(stderr, "User input is: %s %s\n", choice.c_str(), args.c_str());
+        fprintf(stderr, "User input is: %s %s\n", choice.c_str(), args.c_str());
 
         std::tie(app, args) = apps.find(choice);
 
-	if(app->path.size())
-	    chdir(app->path.c_str());
+        if(app->path.size())
+            chdir(app->path.c_str());
 
         ApplicationRunner app_runner(terminal, *app, args);
         return app_runner.command();
@@ -197,6 +239,9 @@ private:
 private:
     std::string dmenu_command;
     std::string terminal;
+
+    stringlist_t environment;
+    bool use_xdg_de = false;
 
     Dmenu *dmenu = 0;
     SearchPath search_path;
